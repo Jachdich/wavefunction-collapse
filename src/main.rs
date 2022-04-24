@@ -11,6 +11,8 @@ use crate::rand::Rng;
 struct WaveFunction {
     options: Vec<u32>,
     final_value: u32,
+    x: i32,
+    y: i32
 }
 
 struct Board {
@@ -20,8 +22,8 @@ struct Board {
 }
 
 impl WaveFunction {
-    fn new(options: &[u32]) -> Self {
-        Self { options: options.to_vec(), final_value: 0 }
+    fn new(x: i32, y: i32, options: &[u32]) -> Self {
+        Self { options: options.to_vec(), final_value: 0, x, y }
     }
 
     fn collapse(&mut self) {
@@ -59,7 +61,7 @@ impl Board {
     fn new(w: usize, h: usize, possible_tiles: &[u32]) -> Self {
         let mut tiles: Vec<WaveFunction> = Vec::with_capacity(w * h);
         for i in 0..(w*h) {
-            tiles.push(WaveFunction::new(possible_tiles));
+            tiles.push(WaveFunction::new((i % w) as i32, (i / w) as i32, possible_tiles));
         }
 
         Board {
@@ -68,7 +70,33 @@ impl Board {
         }
     }
 
-    fn 
+    fn iterate(&mut self) {
+        let min_entropy = self.tiles.iter().min_by_key(|tile| {
+            if tile.entropy() > 0 {
+                tile.entropy()
+            } else {
+                usize::MAX
+            }
+        }).unwrap();
+        let min_entropy = min_entropy.entropy();
+        if min_entropy == 0 {
+            return;
+        }
+        let mut tiles_with_min = self.tiles.iter_mut().filter(|tile| tile.entropy() == min_entropy).collect::<Vec<&mut WaveFunction>>();
+        
+        let mut rng = rand::thread_rng();
+        let idx = rng.gen_range(0..tiles_with_min.len());
+        let tile = &mut tiles_with_min[idx];
+
+        tile.collapse();
+        let x = tile.x;
+        let y = tile.y;
+        self.propogate(x, y);
+    }
+
+    fn propogate(&mut self, x: i32, y: i32) {
+        
+    }
 }
 
 pub fn main() {
@@ -97,20 +125,18 @@ pub fn main() {
     let height = 30;
     
     let mut board = Board::new(width, height, &possible_tiles);
-    let tw = std::cmp::min(winwidth as usize / width, winheight as usize / height);
+    let tw = std::cmp::min(winwidth as usize / board.width, winheight as usize / board.height);
     'running: loop {
         i = (i + 1) % 255;
         canvas.set_draw_color(Color::BLACK);
         canvas.clear();
-        let mut pos = 0;
         for tile in &board.tiles {
             canvas.set_draw_color(tile.colour());
 
-            let x = (pos % width) * tw;
-            let y = (pos / width) * tw;
+            let x = tile.x * tw as i32;
+            let y = tile.y * tw as i32;
             
-            canvas.fill_rect(Rect::new(x as i32, y as i32, tw as u32, tw as u32));
-            pos += 1;
+            canvas.fill_rect(Rect::new(x, y, tw as u32, tw as u32)).unwrap();
         }
         for event in event_pump.poll_iter() {
             match event {
@@ -122,6 +148,8 @@ pub fn main() {
             }
         }
         // The rest of the game loop goes here...
+
+        board.iterate();
 
         canvas.present();
         ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
