@@ -7,6 +7,7 @@ use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use std::time::Duration;
 use crate::rand::Rng;
+use std::collections::HashMap;
 
 struct WaveFunction {
     options: Vec<u32>,
@@ -18,7 +19,26 @@ struct WaveFunction {
 struct Board {
     tiles: Vec<WaveFunction>,
     width: usize,
-    height: usize
+    height: usize,
+    rules: HashMap<u32, TileRule>
+}
+
+struct TileRule {
+    up: Vec<u32>,
+    right: Vec<u32>,
+    down: Vec<u32>,
+    left: Vec<u32>,
+}
+
+impl TileRule {
+    fn new(up: &[u32], right: &[u32], down: &[u32], left: &[u32]) -> Self {
+        Self {
+            up: up.to_vec(),
+            down: down.to_vec(),
+            left: left.to_vec(),
+            right: right.to_vec(),
+        }
+    }
 }
 
 impl WaveFunction {
@@ -55,10 +75,18 @@ impl WaveFunction {
             Color::RGB(r, g, b)
         }
     }
+
+    fn total_options(&self) -> Vec<u32> {
+        if self.options.len() == 0 {
+            vec![self.final_value]
+        } else {
+            self.options.clone()
+        }
+    }
 }
 
 impl Board {
-    fn new(w: usize, h: usize, possible_tiles: &[u32]) -> Self {
+    fn new(w: usize, h: usize, possible_tiles: &[u32], rules: HashMap<u32, TileRule>) -> Self {
         let mut tiles: Vec<WaveFunction> = Vec::with_capacity(w * h);
         for i in 0..(w*h) {
             tiles.push(WaveFunction::new((i % w) as i32, (i / w) as i32, possible_tiles));
@@ -66,7 +94,8 @@ impl Board {
 
         Board {
             tiles,
-            width: w, height: h
+            width: w, height: h,
+            rules
         }
     }
 
@@ -94,12 +123,73 @@ impl Board {
         self.propogate(x, y);
     }
 
+    fn tile_at(&self, x: i32, y: i32) -> &WaveFunction {
+        &self.tiles[y as usize * self.width + x as usize]
+    }
+    
+    fn tile_at_mut(&mut self, x: i32, y: i32) -> &mut WaveFunction {
+        &mut self.tiles[y as usize * self.width + x as usize]
+    }
+    
     fn propogate(&mut self, x: i32, y: i32) {
+        let tile = self.tile_at_mut(x, y);
+        if tile.entropy() == 1 {
+            tile.collapse();
+        } else if tile.entropy() != 0 {
+            let up_tile = self.tile_at(x, y + 1);
+            let down_tile = self.tile_at(x, y - 1);
+            let left_tile = self.tile_at(x - 1, y);
+            let right_tile = self.tile_at(x + 1, y);
+            let rules = &self.rules;
+
+            let mut has_changed = false;
+            let mut new_options: Vec<u32> = Vec::new();
+            for option in self.tile_at(x, y).options.iter() {
+                let rule = &rules[option];
+
+                let mut follows_rule = false;
+                for rule_option in rule.up.iter() {
+                    if up_tile.total_options().contains(rule_option) {
+                        follows_rule = true;
+                    }
+                }
+                if follows_rule {
+                    new_options.push(*option);
+                } else {
+                    has_changed = true;
+                }
+            }
+
+            let tile = self.tile_at_mut(x, y);
+            tile.options = new_options;
+            if tile.entropy() == 0 {
+                panic!("TODO implement backtrack");
+            } else if tile.entropy() == 1 {
+                tile.collapse();
+            }
+            
+            if has_changed {
+                self.propogate(x, y + 1);
+                self.propogate(x, y - 1);
+                self.propogate(x + 1, y);
+                self.propogate(x - 1, y);
+            }
         
+            /*tile.options.retain(|tile_type| {
+                let rule = &rules[tile_type];
+
+                for rule_option in rule.up.iter() {
+                    if up_tile.total_options().contains(rule_option) {
+                        return false;
+                    }
+                }
+                return true;
+            });*/
+        }
     }
 }
 
-pub fn main() {
+fn main() {
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
 
@@ -120,11 +210,15 @@ pub fn main() {
     let mut i = 0;
 
     let possible_tiles = [0xFF0000, 0x00FF00, 0x0000FF];
+    let tile_rules = HashMap::from([
+        (0xFF0000, TileRule::new(&[0xFF0000, 0x00FF00], &[0xFF0000, 0x00FF00], &[0xFF0000, 0x00FF00], &[0xFF0000, 0x00FF00])),
+        (0x00FF00, TileRule::new(&[0x00FF00, 0xFF0000, 0x0000FF], &[0x00FF00, 0xFF0000, 0x0000FF], &[0x00FF00, 0xFF0000, 0x0000FF], &[0x00FF00, 0xFF0000, 0x0000FF])),
+        (0x0000FF, TileRule::new(&[0x00ff00, 0x0000ff], &[0x00ff00, 0x0000ff], &[0x00ff00, 0x0000ff], &[0x00ff00, 0x0000ff]))]);
 
     let width = 30;
     let height = 30;
     
-    let mut board = Board::new(width, height, &possible_tiles);
+    let mut board = Board::new(width, height, &possible_tiles, tile_rules);
     let tw = std::cmp::min(winwidth as usize / board.width, winheight as usize / board.height);
     'running: loop {
         i = (i + 1) % 255;
@@ -147,7 +241,6 @@ pub fn main() {
                 _ => {}
             }
         }
-        // The rest of the game loop goes here...
 
         board.iterate();
 
